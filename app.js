@@ -10,9 +10,30 @@ const User = require('./models/user')
 
 const app = express()
 
-const events = []
-
 app.use(bodyParser.json())
+
+const events = eventIds => {
+    return Event.find({_id: {$in: eventIds}})
+    .then(events => {
+        return events.map(event => {
+            return {
+                 ... event._doc,
+                _id: event.id,
+                creator: user.bind(this, event.creator)
+                }
+        })
+    })
+}
+
+const user = userId => {
+    return User.findById(userId)
+    .then(user => {
+        return { ...user._doc, _id: user.id, createdEvents: events.bind(this, user._doc.createdEvents)}
+    })
+    .catch(err => {
+        throw err;
+    })
+}
 
 app.use('/graphql', grapqlHttp({
     schema: buildSchema(`
@@ -23,12 +44,14 @@ app.use('/graphql', grapqlHttp({
             description: String!
             price: Float!
             date: String!
+            creator: User!
         }
 
         type User {
             _id: ID!
             email: String!
             password: String
+            createdEvents: [Event!]
         }
 
         input EventInput {
@@ -62,7 +85,11 @@ app.use('/graphql', grapqlHttp({
             return Event.find()
                 .then(events => {
                     return events.map(event => {
-                        return { ...event._doc, _id: event._doc._id.toString() }
+                        return { 
+                            ...event._doc,
+                             _id: event.id,
+                            creator: user.bind(this, event._doc.creator)
+                            }
                     })
                 })
                 .catch(err => {
@@ -74,13 +101,25 @@ app.use('/graphql', grapqlHttp({
                 title: args.eventInput.title,
                 description: args.eventInput.description,
                 price: +args.eventInput.price,
-                date: new Date(args.eventInput.date)
+                date: new Date(args.eventInput.date),
+                creator: '5c311f75d1d7095839230d99'
             })
+            let createdEvent
             return event
                 .save()
                 .then(result => {
-                    console.log(result)
-                    return { ...result._doc, _id: result._doc._id.toString() }
+                    createdEvent = { ...result._doc, _id: result._doc._id.toString(), creator:  user.bind(this, result._doc.creator)}
+                    return User.findById('5c311f75d1d7095839230d99')
+                })
+                .then(user => {
+                    if(!user) {
+                        throw new Error('User not found')
+                    }
+                    user.createdEvents.push(event)
+                    return user.save()
+                })
+                .then(result => {
+                    return createdEvent
                 })
                 .catch(err => {
                     console.log(err)
@@ -93,8 +132,7 @@ app.use('/graphql', grapqlHttp({
                     if(user) {
                         throw new Error('User exists already')
                     }
-                    return bcrypt
-                    .hash(args.userInput.password, 12)
+                    return bcrypt.hash(args.userInput.password, 12)
                 })
                 .then(hashedPassword => {
                     const user = new User({
@@ -114,11 +152,13 @@ app.use('/graphql', grapqlHttp({
         graphiql: true
 }))
 
-console.log()
-
-mongoose.connect(`mongodb+srv://${process.env.MONGO_USER}:${process.env.MONGO_PASSWORD}@cluster0-7yx02.mongodb.net/${process.env.MONGO_DB}?retryWrites=true`
-).then(() => {
+mongoose.connect(
+    `mongodb+srv://${process.env.MONGO_USER}:${process.env.MONGO_PASSWORD}@cluster0-7yx02.mongodb.net/${process.env.MONGO_DB}?retryWrites=true`,
+    { useNewUrlParser: true }
+)
+.then(() => {
     app.listen(3000)
-}).catch(err => {
+})
+.catch(err => {
     console.log(err)
 })
